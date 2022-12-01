@@ -1,0 +1,62 @@
+Cell Line Name	Panel Name
+CCRF-CEM	Leukemia
+HL-60(TB)	Leukemia
+K-562	Leukemia
+MOLT-4	Leukemia
+RPMI-8226	Leukemia
+SR	Leukemia
+A549/ATCC	Non-Small Cell Lung
+EKVX	Non-Small Cell Lung
+HOP-62	Non-Small Cell Lung
+HOP-92	Non-Small Cell Lung
+NCI-H226	Non-Small Cell Lung
+NCI-H23	Non-Small Cell Lung
+NCI-H322M	Non-Small Cell Lung
+NCI-H460	Non-Small Cell Lung
+NCI-H522	Non-Small Cell Lung
+COLO 205	Colon
+HCC-2998	Colon
+HCT-116	Colon
+HCT-15	Colon
+HT29	Colon
+KM12	Colon
+SW-620	Colon
+SF-268	CNS
+SF-295	CNS
+SF-539	CNS
+SNB-19	CNS
+SNB-75	CNS
+U251	CNS
+LOX IMVI	Melanoma
+MALME-3M	Melanoma
+M14	Melanoma
+MDA-MB-435	Melanoma
+SK-MEL-2	Melanoma
+SK-MEL-28	Melanoma
+SK-MEL-5	Melanoma
+UACC-257	Melanoma
+UACC-62	Melanoma
+IGROV1	Ovarian
+OVCAR-3	Ovarian
+OVCAR-4	Ovarian
+OVCAR-5	Ovarian
+OVCAR-8	Ovarian
+NCI/ADR-RES	Ovarian
+SK-OV-3	Ovarian
+786-0	Renal
+A498	Renal
+ACHN	Renal
+CAKI-1	Renal
+RXF 393	Renal
+SN12C	Renal
+TK-10	Renal
+UO-31	Renal
+PC-3	Prostate
+DU-145	Prostate
+MCF7	Breast
+MDA-MB-231/ATCC	Breast
+MDA-MB-468	Breast
+HS 578T	Breast
+MDA-N	Breast
+BT-549	Breast
+T-47D	Breast
