@@ -1,10 +1,11 @@
 library(synergyfinder)
 library(data.table)
 library(dplyr)
+library(tidyverse)
 library("GGally")
+library(viridis)
 
-setwd("~/Documents/Elemento lab/clinicaltrials.gov")
-data_dir = "/Users/chengqi_xu/Documents/Elemento lab/clinicaltrials.gov"
+data_dir = getwd()
 # Load the ALMANAC data.
 almanac_dat = read.csv(paste0(data_dir, "/NCI-ALMANAC_full_data.csv"))
 # Convert it to a data.table. 
@@ -91,47 +92,99 @@ joined_tibble <- left_join(long_NCI60_COMBO_SCORE, mylookup_tibble,
                            by = c("NSC1" = "IX"))
 long_NCI60_COMBO_SCORE <- left_join(joined_tibble, mylookup_tibble, 
                          by = c("NSC2" = "IX"))
+write.table(long_NCI60_COMBO_SCORE, file = "long_DTP_NCI60_ALMANAC_COMBO_SCORE.csv",sep=",")
+
 # >>>> finally get complete scores
 
-combosyn_5scores <- left_join(combosyn, long_NCI60_COMBO_SCORE, 
-                                    by = c("drug1" = "Drug.x", "drug2" = "Drug.y",
-                                           "CellLine"="CELLNAME")) %>% 
-                              dplyr::select(block_id,drug1,drug2,CellLine,Panel.Name,
-                                          ZIP_synergy,HSA_synergy,Bliss_synergy,Loewe_synergy,COMBO_SCORE)
+#dcdb calculation 
+dcdb_score <- read.csv(paste0(data_dir, "/dcdb_crawler_almanac_withID.csv"))
+NCI60_TO_TISSUE <- mutate_all(NCI60_TO_TISSUE, .funs=toupper)
+dcdb_score <- mutate_all(dcdb_score, .funs=toupper)
+long_NCI60_COMBO_SCORE <- mutate_all(long_NCI60_COMBO_SCORE, .funs=toupper)
+
+dcdb_score <- left_join(dcdb_score, NCI60_TO_TISSUE, 
+                        by = c("Cell.line" = "Cell.Line.Name"))
+
+combosyn_5scores <- left_join(dcdb_score, long_NCI60_COMBO_SCORE,
+                                    by = c("Drug1" = "Drug.x", "Drug2" = "Drug.y",
+                                           "Cell.line"="CELLNAME")) %>%
+                              dplyr::select(ID,Drug1,Drug2,Cell.line,Panel.Name,
+                                          ZIP,HSA,Bliss,Loewe,COMBO_SCORE)
+# combosyn_5scores <- left_join(combosyn, dcdb_score,
+#                                     by = c("drug1" = "Drug.x", "drug2" = "Drug.y",
+#                                            "CellLine"="CELLNAME")) %>%
+#                               dplyr::select(block_id,drug1,drug2,CellLine,Panel.Name,
+#                                           ZIP_synergy,HSA_synergy,Bliss_synergy,Loewe_synergy,COMBO_SCORE)
+
+# combosyn_5scores <- left_join(combosyn, long_NCI60_COMBO_SCORE, 
+#                                     by = c("drug1" = "Drug.x", "drug2" = "Drug.y",
+#                                            "CellLine"="CELLNAME")) %>% 
+#                               dplyr::select(block_id,drug1,drug2,CellLine,Panel.Name,
+#                                           ZIP_synergy,HSA_synergy,Bliss_synergy,Loewe_synergy,COMBO_SCORE)
 combosyn_5scores <- combosyn_5scores[!is.na(combosyn_5scores$COMBO_SCORE),] # remove combo score is 0
 
+combosyn_5scores$Loewe <- as.double(combosyn_5scores$Loewe)
+combosyn_5scores$ZIP <- as.double(combosyn_5scores$ZIP)
+combosyn_5scores$Bliss <- as.double(combosyn_5scores$Bliss)
+combosyn_5scores$HSA <- as.double(combosyn_5scores$HSA)
+combosyn_5scores$COMBO_SCORE <- as.double(combosyn_5scores$COMBO_SCORE)
+fig1c <- ggpairs(combosyn_5scores,
+                 columns=c("Loewe","ZIP", "Bliss", "HSA","COMBO_SCORE"),
+                 columnLabels=c("Loewe", "ZIP","Bliss", "HSA","ALMANAC.Score"),
+                 title = "Scatterplot Matrix with Linear and Loess Fits",
+                 lower=list(continuous=my_fn),
+                 diag = list(continuous = "barDiag", fill="green",colour = "green"),
+                 upper = list(continuous = wrap("cor", method = "pearson"))) +
+  mytheme
+fig1c
 
 #fig1c
-diagplots <- function(data, mapping) {
-  ggplot(data = data, mapping = mapping) +
-    geom_histogram(fill="lightblue", color="black")
-}
-
-lowerplots <- function(data, mapping) {
-  ggplot(data = data, mapping = mapping) +
-    geom_point(color="darkgrey") +
-    geom_smooth(method = "lm", color = "steelblue", se=FALSE) +
-    geom_smooth(method="loess", color="red", se=FALSE, linetype="dashed")
-}
-
-
-upperplots <- function(data, mapping) {
-  ggally_cor(data=data, mapping=mapping,
-             displayGrid=FALSE, size=3.5, color="black")
-}
 
 mytheme <-  theme(strip.background = element_blank(),
                   panel.grid       = element_blank(),
                   panel.background = element_blank(),
                   panel.border = element_rect(color="grey20", fill=NA))
 
+my_fn <- function(data, mapping, N=100, ...){
+  
+  get_density <- function(x, y, n ) {
+    dens <- MASS::kde2d(x = x, y = y, n = n)
+    ix <- findInterval(x, dens$x)
+    iy <- findInterval(y, dens$y)
+    ii <- cbind(ix, iy)
+    return(dens$z[ii])
+  }
+  
+  X <- eval_data_col(data, mapping$x)
+  Y <- eval_data_col(data, mapping$y)
+  
+  data$density <- get_density(x=X, y=Y, n=N)
+  
+  p <- ggplot(data, mapping) +
+    geom_point(aes(colour=density,  alpha = 0.2, size=5), ...) +
+    scale_color_viridis()      
+  p
+}
+
+#filter combosyn_5scores: Loewe, ZIP, Bliss, HSA on
+combosyn_5scores <- combosyn_5scores %>% filter(Loewe_synergy > -200 & Loewe_synergy < 200)
 
 fig1c <- ggpairs(combosyn_5scores,
         columns=c("Loewe_synergy","ZIP_synergy", "Bliss_synergy", "HSA_synergy","COMBO_SCORE"),
         columnLabels=c("Loewe", "ZIP","Bliss", "HSA","ALMANAC.Score"),
         title = "Scatterplot Matrix with Linear and Loess Fits",
-        lower = list(continuous = lowerplots),
-        diag =  list(continuous = diagplots),
-        upper = list(continuous = upperplots)) +
+        lower=list(continuous=my_fn),
+        diag = list(continuous = "barDiag", fill="green",colour = "green"),
+        upper = list(continuous = wrap("cor", method = "pearson"))) +
   mytheme
+fig1c
+
+#fig1d
+
+
+
+
+
+
+
 
