@@ -171,9 +171,9 @@ combosyn_5scores <- assigning(name="ZIP")
 combosyn_5scores <- assigning(name="COMBO_SCORE")
 #
 chem_melt <- combosyn_5scores_pths %>% 
-  dplyr::select("HSA_label","Bliss_label","Loewe_label",
-                "ZIP_label","COMBO_SCORE_label","chemical_similarity") %>% 
-  rename(., "HSA"="HSA_label","Bliss"="Bliss_label","Loewe"="Loewe_label","ZIP"="ZIP_label","ALMANAC SCORE"="COMBO_SCORE_label") %>% 
+  dplyr::select("HSA _label","Bliss _label","Loewe _label",
+                "ZIP _label","COMBO_SCORE _label","chemical_similarity") %>% 
+  #rename(., "HSA"="HSA _label","Bliss"="Bliss _label","Loewe"="Loewe _label","ZIP"="ZIP _label","ALMANAC SCORE"="COMBO_SCORE _label") %>% 
   melt(., id.vars="chemical_similarity", variable.name="metrics",value.name = "type")
 chem_melt <- chem_melt %>% mutate(type = case_when(
   type %in% c("") ~ "Neither",
@@ -201,12 +201,12 @@ for(mol in drug_bag){
   v <- as.character(mol)
   #only include drug that have target genes > 2
   if (length(rownames(dpi[dpi[[v]] ==1,])) >= 2){
-    # kk <- enrichKEGG(gene   = rownames(dpi[dpi[[v]] ==1,]), #
-    #                  organism     = 'hsa',
-    #                  minGSSize = 5,
-    #                  pvalueCutoff = 0.05)
+    kk <- enrichKEGG(gene   = rownames(dpi[dpi[[v]] ==1,]), #
+                     organism     = 'hsa',
+                     minGSSize = 5,
+                     pvalueCutoff = 0.05)
     #print(kk$GeneRatio/kk$BgRatio)
-    kk <-  enrichPathway(gene   = rownames(dpi[dpi[[v]] ==1,]))
+    #kk <-  enrichPathway(gene   = rownames(dpi[dpi[[v]] ==1,]))
     kegg_pths[[v]] <- kk$Description
   }
   
@@ -233,9 +233,9 @@ for(row in 1:nrow(combosyn_5scores_pths)) {
 }
 
 pths_melt <- combosyn_5scores_pths %>% 
-  dplyr::select("HSA_label","Bliss_label","Loewe_label",
-                "ZIP_label","COMBO_SCORE_label","pth_similarity") %>% 
-  rename(., "HSA"="HSA_label","Bliss"="Bliss_label","Loewe"="Loewe_label","ZIP"="ZIP_label","ALMANAC SCORE"="COMBO_SCORE_label") %>% 
+  dplyr::select("HSA _label","Bliss _label","Loewe _label",
+                "ZIP _label","COMBO_SCORE _label","pth_similarity") %>% 
+  #rename(., "HSA"="HSA _label") %>% 
   melt(., id.vars="pth_similarity", variable.name="metrics",value.name = "type")
 pths_melt <- pths_melt %>% mutate(type = case_when(
   type %in% c("") ~ "Neither",
@@ -245,6 +245,46 @@ pths_melt <- pths_melt %>% mutate(type = case_when(
 ggplot(pths_melt, aes(pth_similarity, colour = type,linetype=metrics)) +
   stat_ecdf(geom = "step") + scale_color_manual(values = c("#91D1C2B2",'grey',"#E64B35B2")) +
   theme_classic()
+
+#flatten list
+melt_kegg_pths <- kegg_pths %>% do.call(rbind, .) %>% melt(.) %>% 
+  dplyr::select("Var1","value",d=Var1,pth=value) %>% distinct()
+
+# kegg,
+r <- combosyn_5scores_pths %>% rename("HSA _label"="HSA_label","Bliss _label"="Bliss_label","Loewe _label"="Loewe_label","ZIP _label"="ZIP_label","COMBO_SCORE _label"="COMBO_SCORE_label")
+#
+subset <- r %>% dplyr::select("compound1_x","compound1_y","HSA_label")  %>% 
+  group_by(compound1_x,compound1_y) %>% 
+  count(HSA_label, sort = TRUE) %>% dcast(.,compound1_x+compound1_y~HSA_label)  %>% 
+  dplyr::select("compound1_x","compound1_y","antagonistic","synergistic") 
+subset[is.na(subset)] <- 0
+
+subset_pth <- subset %>% 
+  left_join(., melt_kegg_pths,by = c("compound1_x" = "d")) %>% 
+  left_join(., melt_kegg_pths,by = c("compound1_y" = "d")) %>% 
+  drop_na()
+  #remove rows with na
+
+#This is background:sum(subset$antagonistic) = 133228 records; sum(subset$antagonistic) = 11571 records
+subset_pth_sum <- subset_pth %>% group_by(pth.x,pth.y) %>% summarise(synergistic_sum=sum(synergistic),
+                                                                     antagonistic_sum=sum(antagonistic))
+#Toy sample,
+# 144799 records of which 11571 are synergistic,
+# a pathway(combo) with 1149+3359=4508 records,
+# including 7755 of the 11571 synergy records
+##                 syn             anta
+## pathwayYes    1149           3359
+## pathwayNo    11571-1149                             144799-4508-(11571-1149) 
+
+dat <- matrix(c(1149, 10422, 3359, 129869), nrow = 2, ncol = 2)
+rownames(dat) <- c("Mutated gene", "No mutated gene")
+colnames(dat) <- c("Cancer", "Normal")
+dat
+fisher.test(dat)
+
+
+
+
 
 
 
