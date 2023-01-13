@@ -9,6 +9,10 @@ library(pheatmap)
 library(RColorBrewer)
 library(clusterProfiler)
 library(ReactomePA)
+library(OmnipathR)
+library(igraph)
+library(ggraph)
+library(janitor)
 
 #dcdb calculation 
 data_dir = getwd()
@@ -251,7 +255,7 @@ melt_kegg_pths <- kegg_pths %>% do.call(rbind, .) %>% melt(.) %>%
   dplyr::select("Var1","value",d=Var1,pth=value) %>% distinct()
 
 # kegg,
-r <- combosyn_5scores_pths %>% rename("HSA _label"="HSA_label","Bliss _label"="Bliss_label","Loewe _label"="Loewe_label","ZIP _label"="ZIP_label","COMBO_SCORE _label"="COMBO_SCORE_label")
+r <- combosyn_5scores_pths %>% rename("HSA_label"="HSA _label","Bliss_label"="Bliss _label","Loewe_label"="Loewe _label","ZIP_label"="ZIP _label","COMBO_SCORE_label"="COMBO_SCORE _label")
 #
 subset <- r %>% dplyr::select("compound1_x","compound1_y","HSA_label")  %>% 
   group_by(compound1_x,compound1_y) %>% 
@@ -265,35 +269,251 @@ subset_pth <- subset %>%
   drop_na()
   #remove rows with na
 
-#This is background:sum(subset$antagonistic) = 133228 records; sum(subset$antagonistic) = 11571 records
+#This is background:sum(subset$antagonistic) = 133228 records; sum(subset$synergistiv) = 11571 records
 subset_pth_sum <- subset_pth %>% group_by(pth.x,pth.y) %>% summarise(synergistic_sum=sum(synergistic),
                                                                      antagonistic_sum=sum(antagonistic))
 #Toy sample,
 # 144799 records of which 11571 are synergistic,
 # a pathway(combo) with 1149+3359=4508 records,
-# including 7755 of the 11571 synergy records
+# including 1149 of the 11571 synergy records
 ##                 syn             anta
 ## pathwayYes    1149           3359
 ## pathwayNo    11571-1149                             144799-4508-(11571-1149) 
 
-dat <- matrix(c(1149, 10422, 3359, 129869), nrow = 2, ncol = 2)
-rownames(dat) <- c("Mutated gene", "No mutated gene")
-colnames(dat) <- c("Cancer", "Normal")
-dat
-fisher.test(dat)
+# dat <- matrix(c(1149, 10422, 3359, 129869), nrow = 2, ncol = 2)
+# rownames(dat) <- c("Mutated gene", "No mutated gene")
+# colnames(dat) <- c("Cancer", "Normal")
+# fisher.test(dat)
+
+myFUN<- function(x) {
+  py_syn = as.numeric(x["synergistic_sum"])
+  py_anta = as.numeric(x["antagonistic_sum"])
+  dat <- matrix(c(py_syn, (11571-py_syn), py_anta, (144799-(py_syn+py_anta)-(11571-py_syn))), nrow = 2, ncol = 2)
+  t <- fisher.test(dat)
+  # x["low"] <- t$conf.int[1]
+  # x["high"] <- t$conf.int[2]
+  # x["est"] <- t$estimate
+  c(t$conf.int[1],t$conf.int[2],t$estimate)
+  }
+or_output <- as.data.frame(t(apply(subset_pth_sum,1,myFUN)))
+subset_pth_sum$low_HSA <- or_output$V1
+subset_pth_sum$high_HSA <- or_output$V2
+subset_pth_sum$odds_HSA <- or_output$"odds ratio"
+
+# write.table(subset_pth_sum, file = "or_HSA.csv",sep=",",row.names=FALSE)
+
+or_hsa <- read.csv(paste0(data_dir, "/or_HSA.csv"))
+or_bliss <- read.csv(paste0(data_dir, "/or_Bliss.csv"))
+or_loewe <- read.csv(paste0(data_dir, "/or_Loewe.csv"))
+or_zip <- read.csv(paste0(data_dir, "/or_ZIP.csv"))
+or_combo <- read.csv(paste0(data_dir, "/or_COMBO_SCORE.csv"))
+
+MergedDF <- Reduce(function(x,y) merge(x,y,by= c("pth.x","pth.y"),all=TRUE),
+                   list(or_hsa,or_bliss,or_loewe,or_zip,or_combo))
+#at least one synergy metric with an Odd’s Ratio lower confidence interval above 1.5 
+#and an Odd’s Ratio 373higher confidence interval lower than 1. 
+
+
+MergedDF_t <- MergedDF %>% dplyr::select(starts_with("pth") | starts_with("low") | starts_with("high") | starts_with("odds")) %>% 
+  filter_at(vars(starts_with("low")), any_vars(. >= 1.5)) %>%  
+  filter_at(vars(starts_with("high")), any_vars(. < 1)) %>%
+  dplyr::select(starts_with("pth") | starts_with("odds")) %>% 
+  pivot_longer(-c("pth.x","pth.y"), names_to = "group", values_to = "y")
+
+ggplot(MergedDF_t, aes(y, colour =group)) +
+  stat_ecdf(geom = "step")+
+  xlim(0, 5) + scale_x_continuous(limits=c(0,5), breaks=seq(0,5, by = 1))+
+  labs(x= "Odds ratio", y= "Frequency") +
+  theme_classic() 
+
+MergedDF_s <- MergedDF %>% dplyr::select(starts_with("pth") | starts_with("low") | starts_with("high") | starts_with("odds")) %>% 
+  filter_at(vars(starts_with("low")), any_vars(. >= 1.5)) %>%  
+  filter_at(vars(starts_with("high")), any_vars(. < 1))
+  
+MergedDF_s <- MergedDF_across %>% filter(pth.x=="Rap1 signaling pathway",pth.y=="Phagosome") 
+df <- data.frame(yAxis = c("ZIP","Loewe","HSA","ALMANAC","Bliss"), 
+                 boxOdds = c(MergedDF_s$odds_ZIP,MergedDF_s$odds_Loewe,MergedDF_s$odds_HSA,MergedDF_s$odds_COMBO_SCORE,MergedDF_s$odds_Bliss), 
+                 boxCILow = c(MergedDF_s$low_ZIP,MergedDF_s$low_Loewe,MergedDF_s$low_HSA,MergedDF_s$low_COMBO_SCORE,MergedDF_s$low_Bliss), 
+                 boxCIHigh = c(MergedDF_s$high_ZIP,MergedDF_s$high_Loewe,MergedDF_s$high_HSA,MergedDF_s$high_COMBO_SCORE,MergedDF_s$high_Bliss)
+)
+
+fig2c <- ggplot(df, aes(x = boxOdds, y = yAxis)) +
+            geom_vline(aes(xintercept = 1), size = .25, linetype = "dashed") +
+            geom_errorbarh(aes(xmax = boxCIHigh, xmin = boxCILow), size = .5, height =
+                             .2, color = "gray50") +
+            geom_point(size = 3.5, color = "orange")+
+            labs(x= "Odds ratio", y= "") + xlim(0, 13) +
+              theme_classic()
+fig2c
+
+## Do we also find pathway combination that are irrelvant with metrics calculation
+MergedDF_across <- MergedDF %>% dplyr::select(starts_with("pth") | starts_with("low") | starts_with("high") | starts_with("odds")) %>% 
+  filter_at(vars(starts_with("low")), all_vars(. >= 1.5))
+
+#Figure2D, https://workflows.omnipathdb.org/drug-targets.html#initialise-omnipath-database
+#https://r.omnipathdb.org/reference/OmnipathR.html
+combosyn_5scores <- read.csv(paste0(data_dir, "/combosyn_5scores_dbID.csv"))
+dpi <- read.csv("processed_dpi.csv", header=FALSE, sep=",")
+names(dpi) <- dpi[1,]
+dpi <- dpi[-1,]
+rownames(dpi) <- dpi[,1]
+dpi[,1] <- NULL
+
+# Download protein-protein interactions
+interactions <- import_omnipath_interactions()
+OPI_g <- interaction_graph(interactions = interactions )
+
+#ncbi2symbol
+ncbi2symbol <- read.csv("ncbi2symbol.txt", header=TRUE, sep="\t")
+colnames(ncbi2symbol) <- c("symbol","id")
+ncbi2symbol$id <- as.character(ncbi2symbol$id)
+#same target where drug combs had at least one drug target in common
+
+# same pathway
+# shortest_paths(OPI_g, from = "STAT3", to = "CTTN",output = 'epath')$epath[[1]]
+# shortest_paths(OPI_g, from = "CTTN", to = "STAT3",output = 'epath')$epath[[1]]
+
+#parallel pathway: drug targets were upregulated or downregulated by the same gene
+# as.character(incident(OPI_g, "STAT3", mode=c("in")))
+# as.character(incident(OPI_g, "CTTN", mode=c("in"))) 
+
+#
+combosyn_5scores_net <- combosyn_5scores %>% distinct(compound1_x, compound1_y, .keep_all = FALSE)
+#移除没有target的药物
+drug_bag_in_dpi <- unique(colnames(dpi))
+combosyn_5scores_net <-combosyn_5scores_net %>% filter(compound1_x %in% drug_bag_in_dpi &
+                                                      compound1_y %in% drug_bag_in_dpi)
+
+combosyn_5scores_net$network_class <- NA
+for(row in 1:nrow(combosyn_5scores_net)) {
+  d1 <- as.character(combosyn_5scores_net[row, "compound1_x"])
+  d2  <- as.character(combosyn_5scores_net[row, "compound1_y"])
+  
+  tg1 <- dpi %>% dplyr::select(d1)  %>% `colnames<-`(c("drug_name")) %>% 
+    mutate(index = rownames(.)) %>% 
+    filter(., drug_name == 1) %>% dplyr::select("index")
+  tg2 <- dpi %>% dplyr::select(d2)  %>% `colnames<-`(c("drug_name")) %>% 
+    mutate(index = rownames(.)) %>% 
+    filter(., drug_name == 1) %>% dplyr::select("index")
+  
+  #首先判断是否有相同的target
+  if(nrow(intersect(tg1,tg2))>0){
+    combosyn_5scores_net[row, "network_class"] <- "same target"
+  }else{
+    #判断是否有属于同一通路
+   
+    # 遍历所有的基因
+    empty_list <- c()
+    graph_vertex <- V(OPI_g)$name
+    for(i in 1:nrow(tg1)){
+      for(j in 1:nrow(tg2)){
+        # 轉換成gene 名
+        g1 <- as.character(ncbi2symbol %>% dplyr::filter(id %in% tg1[i,]) %>% dplyr::select(symbol))
+        g2 <- as.character(ncbi2symbol %>% dplyr::filter(id %in% tg2[j,]) %>% dplyr::select(symbol))
+        
+        if (g1 %in% graph_vertex && g2 %in% graph_vertex){
+          sp1 <- shortest_paths(OPI_g, from = g1, to = g2,output = 'epath')$epath[[1]]
+          sp2 <- shortest_paths(OPI_g, from = g2, to = g1,output = 'epath')$epath[[1]]
+          
+          if(length(sp1)>0 || length(sp2)>0){
+            empty_list <- rbind(empty_list,"same pathway")
+          }else{
+            # 判断是否属于平行通路
+            in_g1 <- as.character(neighbors(OPI_g, g1, mode=c("in")))
+            in_g2 <- as.character(neighbors(OPI_g, g2, mode=c("in")))
+            in_ <- length(intersect(in_g1,in_g2))
+            if(!is.null(in_)){
+              empty_list <- rbind(empty_list,"parallel pathway")
+            }else{
+              empty_list <- rbind(empty_list,"unidenfitied")
+            }
+          }
+          
+        }else{# 在graph里找不到
+          empty_list <- rbind(empty_list,"notingraph")
+        }
+
+
+      
+      }
+    }
+    combosyn_5scores_net[row, "network_class"] <- empty_list[1]
+  }
+}
+
+write.table(combosyn_5scores_net, file = "combosyn_network_class.csv",sep=",")
+combosyn_network_class <- read.csv(paste0(data_dir, "/combosyn_network_class.csv"))
+
+combosyn_5scores_network <- left_join(combosyn_5scores, combosyn_network_class,
+                                    by = c("compound1_x" = "compound1_x", "compound1_y" = "compound1_y"))
+combosyn_5scores_network <- combosyn_5scores_network %>%
+  mutate(network_class = if_else(is.na(network_class), "notingraph",network_class))
+#Here we want to test whether syn/non differ between same target and others for each synergy metric
+# Start from ALMNAC score, 
+# same target/same pathway/parallel pathway v.s. unidenfitied 
+# combosyn_5scores_network <- combosyn_5scores_network %>% filter(network_class %in%  c("unidentified","same pathway",
+#                                                         "same target","parallel pathway"))
 
 
 
+# #试比较same target组HSA是否比其他组hsa高？
+# 
 
+#create an empty df to store w test value
+w_df <-c("yAxis","boxOdds","boxCILow","boxCIHigh")
 
+w_test <- function(score, score_label, target_class){
 
+  a <- combosyn_5scores_network %>% 
+    mutate(network_class_wx = case_when(
+      network_class == "notingraph" ~ "others",
+      # network_class == "unidenfitied " ~ "others",
+      # network_class != target_class ~ "others",
+      network_class == target_class ~ target_class))
+  
+  a_ <- a %>% filter(!! as.name(score_label) %in%  c("synergistic","antagonistic"))
+  # a_ <- a
+  x <- a_ %>% filter(network_class_wx %in%  c(!!target_class)) %>% select(all_of(score))
+  y <- a_ %>% filter(network_class_wx %in%  c("others")) %>% select(all_of(score))
+  Nj  <- c(nrow(x), nrow(y))
+  wIndDf <- rbind(x,y)
+  wIndDf$IV <- factor(rep(1:2, Nj), labels=LETTERS[1:2])
+  colnames(wIndDf) <- c("v","IV")
+  w <- wilcox.test(v ~ IV, conf.int=TRUE, data=wIndDf,alternative="two.sided",tol.root = 1e-4)
+  w_df <-rbind(w_df,c(score,w$estimate,w$conf.int[1],w$conf.int[2]))
+  # w_df$yAxis <- "HSA"
+  # w_df$boxOdds <- w$estimate
+  # w_df$boxCILow <- w$conf.int[1]
+  # w_df$boxCIHigh <- w$conf.int[2]
+  
+}
+w_df <- w_test("COMBO_SCORE","COMBO_SCORE _label","same target")
+w_df <- w_test("ZIP","ZIP _label","same target")
+w_df <- w_test("Loewe","Loewe _label","same target")
+w_df <- w_test("HSA","HSA _label","same target")
+w_df <- w_test("Bliss","Bliss _label","same target")
+#       
+w_df <- data.frame(w_df) %>% row_to_names(row_number = 1)
+# 
 
+w_df_ <- w_df %>%
+  mutate_if(is.character, as.numeric)
+w_df_$yAxis <- c("COMBO_SCORE","ZIP","Loewe","HSA","Bliss")
 
-
-
-
-
-
-
+fig2d <- ggplot(w_df_, aes(x = boxOdds, y = yAxis)) +
+  geom_vline(aes(xintercept = 0), size = .25, linetype = "dashed") +
+  geom_errorbarh(aes(xmax = boxCIHigh, xmin = boxCILow), size = .5, height =
+                   .2, color = "gray50") +
+  geom_point(size = 2, color = "orange")+
+  labs(x= "Wilcox Location Shift", y= "") + xlim(-1, 6) +
+  theme_classic()
+fig2d
+  
+  
+  
+  
+  
+  
+  
 
 
